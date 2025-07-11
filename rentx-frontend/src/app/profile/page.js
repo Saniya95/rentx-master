@@ -1,4 +1,4 @@
-// Profile page route for /profile
+// app/profile/page.js or pages/profile.js (depending on your file structure)
 import ProfileSection from "@/components/profile/ProfileSection";
 import ChatbotWidget from "@/components/homepage/ChatbotWidget";
 
@@ -11,4 +11,4 @@ export default function ProfilePage() {
       <ChatbotWidget />
     </main>
   );
-} 
+}

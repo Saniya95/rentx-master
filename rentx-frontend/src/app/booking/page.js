@@ -20,8 +20,8 @@ function BookingContent() {
 
 export default function BookingPage() {
   return (
-    <main className="bg-[#F8F1E9] min-h-screen flex flex-col justify-between">
-      <Suspense fallback={<div className="text-center py-20 text-lg">Loading booking form...</div>}>
+    <main className="bg-[#0A0F2C] text-white min-h-screen flex flex-col justify-between">
+      <Suspense fallback={<div className="text-center py-20 text-lg text-white">Loading booking form...</div>}>
         <BookingContent />
       </Suspense>
       <ChatbotWidget />
