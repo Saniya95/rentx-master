@@ -19,7 +19,7 @@ export default function BookingDetailsPage() {
       setError("");
       try {
         console.log("Fetching booking with ID:", bookingId);
-        const data = await api.get(`/bookings/${bookingId}`);
+        const data = await api.get(`/api/bookings/${bookingId}`);
         console.log("Booking data received:", data);
         setBooking(data);
       } catch (err) {

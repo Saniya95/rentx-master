@@ -74,12 +74,12 @@ export default function CategoryTemplate({
       </div>
 
       {/* Sort/Filter Controls */}
-            <div className="container mx-auto px-4 py-6">
+      <div className="container mx-auto px-4 py-6">
         <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl shadow-md p-4 mb-8">
           <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
             <h3 className="font-medium text-[#F5E6C8]">Found {items.length} items</h3>
             <div className="flex flex-wrap gap-4 items-center">
-              <label htmlFor="sort" className="text-sm text-[#F5E6C8]">Sort by:</label>
+              <label htmlFor="sort" className="text-sm text-white">Sort by:</label>
               <select
                 id="sort"
                 value={sortBy}
@@ -96,7 +96,7 @@ export default function CategoryTemplate({
           </div>
         </div>
 
-        {/* Grid View */}
+        {/* Product Grid */}
         <div className={viewMode === "grid" ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" : "flex flex-col gap-4"}>
           {sortedItems.map((item, idx) => (
             <motion.div
@@ -138,17 +138,18 @@ export default function CategoryTemplate({
           ))}
         </div>
 
-        {/* Modal */}
+        {/* Modal on Click */}
         {selectedItem && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm bg-black/40">
-            <div className="bg-[#0A0F2C] w-full md:w-[60%] max-h-[90vh] overflow-y-auto rounded-lg shadow-xl p-6 relative border border-white/10">
+          <div className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm">
+            <div className="bg-white w-full md:w-[60%] max-h-[90vh] overflow-y-auto rounded-lg shadow-lg p-6 relative">
               <button
                 onClick={() => setSelectedItem(null)}
-                className="absolute top-3 right-3 text-gray-400 hover:text-red-500 text-xl"
+                className="absolute top-3 right-3 text-gray-500 hover:text-red-600 text-xl"
               >
                 ✕
               </button>
 
+              {/* Modal Layout with Slider */}
               <div className="grid grid-cols-5 gap-4 mb-6">
                 <div className="col-span-2 flex flex-col gap-4 items-center">
                   <Image
@@ -167,7 +168,7 @@ export default function CategoryTemplate({
                         width={60}
                         height={60}
                         className={`rounded-full border-2 object-cover cursor-pointer ${
-                          idx === activeImageIndex ? "border-yellow-400" : "border-gray-400"
+                          idx === activeImageIndex ? "border-yellow-500" : "border-gray-300"
                         }`}
                         onClick={() => setActiveImageIndex(idx)}
                       />
@@ -175,30 +176,25 @@ export default function CategoryTemplate({
                   </div>
                 </div>
 
-                <div className="col-span-3 space-y-3 text-[#F5E6C8]">
-                  <h2 className="text-2xl font-bold">{selectedItem.name}</h2>
-                  <p className="text-yellow-100">📍 {selectedItem.location}</p>
-                  <p className="text-gray-300">{selectedItem.description}</p>
+                <div className="col-span-3 space-y-3">
+                  <h2 className="text-2xl font-bold text-emerald-800">{selectedItem.name}</h2>
+                  <p className="text-gray-600">📍 {selectedItem.location}</p>
+                  <p className="text-gray-500">{selectedItem.description}</p>
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <p><strong>Authenticity:</strong> {selectedItem.authenticity || "Verified"}</p>
                     <p><strong>Safety:</strong> {selectedItem.safety || "5/5"}</p>
                     <p><strong>Min Days:</strong> {selectedItem.minDays || 1}</p>
                     <p><strong>Rating:</strong> {selectedItem.rating || 4.7} ({selectedItem.reviews || 28} reviews)</p>
                   </div>
-                  <p className="text-lg font-bold text-yellow-300">₹{selectedItem.price} / day</p>
-                  <Link
-                    href={`/booking?rentalId=${selectedItem._id}`}
-                    className="inline-block bg-yellow-400 hover:bg-yellow-300 text-black px-6 py-2 rounded-lg font-semibold text-lg"
-                  >
-                    Pay Now
-                  </Link>
+                  <p className="text-lg font-bold text-emerald-800">₹{selectedItem.price} / day</p>
+                  <Link href={`/booking?rentalId=${selectedItem._id}`} className="inline-block bg-emerald-700 hover:bg-emerald-800 text-white px-6 py-2 rounded-lg font-semibold text-lg">Pay Now</Link>
                 </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* No Items Fallback */}
+        {/* No Items State */}
         {sortedItems.length === 0 && (
           <div className="text-center py-16">
             <div className="bg-white/5 border border-white/10 rounded-lg p-8 inline-block mx-auto text-white">
@@ -214,7 +210,6 @@ export default function CategoryTemplate({
           </div>
         )}
       </div>
-
     </section>
   );
 }

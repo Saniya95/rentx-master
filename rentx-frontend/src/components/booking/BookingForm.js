@@ -1,7 +1,8 @@
+// BookingForm.js with Firebase OTP verification and booking-specific fields
 'use client';
 import { Fragment, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { auth } from '@/utils/firebase';
+import { auth, setupRecaptcha, sendOTP } from '@/utils/firebase';
 import { RecaptchaVerifier, signInWithPhoneNumber } from 'firebase/auth';
 import { FaUser, FaPhone, FaEnvelope, FaMapMarkerAlt, FaRegClock, FaTruck, FaCommentDots } from 'react-icons/fa';
 import { api } from '@/utils/api';
@@ -19,7 +20,6 @@ export default function BookingForm({ rentalId }) {
     pickupDate: '',
     returnDate: ''
   });
-
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [otpVerified, setOtpVerified] = useState(false);
@@ -29,6 +29,7 @@ export default function BookingForm({ rentalId }) {
   const [success, setSuccess] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
   const [termsChecked, setTermsChecked] = useState(false);
+  const [recaptchaReady, setRecaptchaReady] = useState(false);
   const [product, setProduct] = useState(null);
   const [productLoading, setProductLoading] = useState(true);
   const [productError, setProductError] = useState('');
@@ -36,33 +37,62 @@ export default function BookingForm({ rentalId }) {
 
   useEffect(() => {
     async function fetchProduct() {
+      setProductLoading(true);
+      setProductError('');
       try {
-        const data = await api.get(`/rentals/${rentalId}`);
-        setProduct(data);
+        if (rentalId) {
+          const data = await api.get(`/rentals/${rentalId}`);
+          console.log("Product data:", data); // Debug log
+          setProduct(data);
+        }
       } catch (err) {
+        console.error("Error fetching product:", err);
         setProductError('Failed to load product info');
-      } finally {
-        setProductLoading(false);
       }
+      setProductLoading(false);
     }
     if (rentalId) fetchProduct();
   }, [rentalId]);
 
   useEffect(() => {
+    // Setup recaptcha only on client-side and only once
     if (typeof window !== 'undefined' && !window.recaptchaVerifier) {
-      window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
-        size: 'invisible',
-        callback: () => {},
-        'expired-callback': () => {}
-      });
-      window.recaptchaVerifier.render();
+      try {
+        // Create a new recaptcha verifier
+        window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
+          size: 'invisible',
+          callback: () => {
+            console.log("Recaptcha verified");
+            setRecaptchaReady(true);
+          },
+          'expired-callback': () => {
+            console.log("Recaptcha expired");
+            setRecaptchaReady(false);
+          }
+        });
+        
+        // Render the recaptcha
+        window.recaptchaVerifier.render().then(() => {
+          setRecaptchaReady(true);
+        }).catch(error => {
+          console.error("Error rendering recaptcha:", error);
+          setOtpError("Failed to initialize verification system. Please refresh the page.");
+        });
+      } catch (error) {
+        console.error("Error setting up recaptcha:", error);
+        setOtpError("Failed to initialize verification system. Please refresh the page.");
+      }
     }
+    
+    // Clean up function to clear recaptcha when component unmounts
     return () => {
       if (window.recaptchaVerifier) {
         try {
           window.recaptchaVerifier.clear();
           window.recaptchaVerifier = null;
-        } catch {}
+        } catch (e) {
+          console.error("Error clearing recaptcha:", e);
+        }
       }
     };
   }, []);
@@ -73,18 +103,25 @@ export default function BookingForm({ rentalId }) {
       setOtpError('Enter a valid 10-digit phone number.');
       return;
     }
-
+    
     try {
+      if (!window.recaptchaVerifier) {
+        setOtpError('Verification system not ready. Please refresh the page.');
+        return;
+      }
+      
       const phoneNumber = '+91' + form.phone;
       const confirmation = await signInWithPhoneNumber(auth, phoneNumber, window.recaptchaVerifier);
       setConfirmationResult(confirmation);
       setOtpSent(true);
     } catch (err) {
-      setOtpError('Failed to send OTP.');
+      console.error("OTP Error:", err);
+      setOtpError('Failed to send OTP: ' + (err.message || 'Unknown error'));
     }
   };
 
   const handleVerifyOtp = async () => {
+    setOtpError('');
     if (!otp || otp.length !== 6) {
       setOtpError('Enter the 6-digit OTP.');
       return;
@@ -92,213 +129,242 @@ export default function BookingForm({ rentalId }) {
     try {
       await confirmationResult.confirm(otp);
       setOtpVerified(true);
-    } catch {
+    } catch (err) {
       setOtpError('Invalid OTP.');
     }
   };
 
   const handleSubmit = async e => {
     e.preventDefault();
-    if (!termsChecked) return setShowTerms(true);
-    if (!otpVerified) return setError('Verify phone with OTP.');
-    if (!form.name || !form.email || !form.pickupDate || !form.returnDate || !form.address) {
-      return setError('All required fields must be filled.');
+    if (!showTerms && !termsChecked) {
+      setShowTerms(true);
+      return;
     }
-
+    if (!termsChecked) {
+      setError('You must accept the terms and conditions.');
+      return;
+    }
+    if (!otpVerified) {
+      setError('Please verify your phone number with OTP.');
+      return;
+    }
+    if (!form.name || !form.pickupDate || !form.returnDate || !form.email || !form.address) {
+      setError('Please fill all required fields.');
+      return;
+    }
+    if (!rentalId) {
+      setError('Rental ID is missing.');
+      return;
+    }
     try {
       await fetch('https://rentx-backend.onrender.com/api/bookings', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`
+          Authorization: `Bearer ${localStorage.getItem('token')}`,
         },
-        body: JSON.stringify({ ...form, rentalId })
+        body: JSON.stringify({
+          name: form.name,
+          phone: form.phone,
+          email: form.email,
+          altPhone: form.altPhone,
+          address: form.address,
+          deliveryMethod: form.deliveryMethod,
+          preferredTime: form.preferredTime,
+          specialRequests: form.specialRequests,
+          pickupDate: form.pickupDate,
+          returnDate: form.returnDate,
+          rentalId: rentalId
+        }),
       });
       setSuccess(true);
       setTimeout(() => router.push('/bookings'), 1500);
-    } catch {
-      setError('Booking failed.');
+    } catch (err) {
+      console.error("Booking creation failed:", err);
+      setError("Booking failed. Please try again.");
     }
-  };
-
+  }
+    
   return (
     <Fragment>
       <style jsx global>{`
-        input::placeholder,
-        textarea::placeholder {
-          color: #ccc !important;
+        input::placeholder, textarea::placeholder {
+          color: #666 !important;
           opacity: 1 !important;
         }
       `}</style>
-
-      <div className="bg-white/5 backdrop-blur-xl text-white border border-white/10 rounded-3xl shadow-2xl p-8 w-full max-w-2xl mx-auto relative">
-        <div className="mb-6 text-center">
+      <div className="bg-gradient-to-br from-emerald-50 to-amber-50 rounded-3xl shadow-2xl p-8 w-full max-w-2xl mx-auto border border-emerald-100 relative overflow-hidden">
+        {/* Product Name at Top */}
+        <div className="mb-8 text-center">
           {productLoading ? (
-            <div className="text-lg text-gray-300">Loading product info...</div>
+            <div className="text-lg text-gray-500">Loading product info...</div>
           ) : productError ? (
-            <div className="text-lg text-red-500">{productError}</div>
+            <div className="text-lg text-red-600">{productError}</div>
           ) : product ? (
-            <>
-              <h2 className="text-3xl md:text-4xl font-bold text-[#F5E6C8] font-playfair">
-                {product.title || 'Product'}
-              </h2>
-              <p className="text-sm text-yellow-500 italic">{product.category}</p>
-            </>
+            <div>
+              <span className="text-3xl md:text-4xl font-extrabold text-emerald-900 font-playfair drop-shadow">
+                {product.title || product.name || "Product"}
+              </span>
+              {product.category && (
+                <span className="ml-2 text-xl md:text-2xl font-semibold text-amber-600 font-serif">({product.category})</span>
+              )}
+            </div>
           ) : null}
         </div>
-
-        <h2 className="text-2xl font-bold text-[#F5E6C8] mb-6 font-playfair text-center">
-          Book Your Product
-        </h2>
-
-        {error && <div className="mb-4 p-3 bg-red-500/10 text-red-300 border border-red-500 rounded">{error}</div>}
-        {success && <div className="mb-4 p-3 bg-green-500/10 text-green-300 border border-green-500 rounded animate-bounce">Booking successful!</div>}
-
-        <div id="recaptcha-container" className="absolute bottom-0 z-[-1]" />
-
+        <h2 className="text-3xl font-extrabold mb-6 text-emerald-900 text-center font-playfair tracking-wide drop-shadow">Book Your Product</h2>
+        {error && <div className="mb-4 p-3 bg-red-100 text-red-800 rounded shadow">{error}</div>}
+        {success && <div className="mb-4 p-3 bg-green-100 text-green-800 rounded shadow animate-bounce">Booking successful!</div>}
+        
+        {/* Always render the recaptcha container outside of any conditional rendering */}
+        <div id="recaptcha-container" style={{ position: 'absolute', bottom: 0, zIndex: -1, height: 0 }}></div>
+        
         <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {[
-            { label: 'Full Name', icon: FaUser, name: 'name', required: true },
-            { label: 'Email', icon: FaEnvelope, name: 'email', type: 'email', required: true },
-            { label: 'Phone Number', icon: FaPhone, name: 'phone', required: true },
-            { label: 'Alternate Phone', icon: FaPhone, name: 'altPhone' },
-            { label: 'Preferred Time', icon: FaRegClock, name: 'preferredTime', type: 'time' },
-            { label: 'Pickup Date', name: 'pickupDate', type: 'date', required: true },
-            { label: 'Return Date', name: 'returnDate', type: 'date', required: true }
-          ].map((field, idx) => (
-            <div className="flex flex-col" key={idx}>
-              <label className="mb-1 text-sm text-[#F5E6C8] font-medium flex items-center gap-2">
-                {field.icon && <field.icon className="text-yellow-500" />}
-                {field.label} {field.required && <span className="text-red-400">*</span>}
-              </label>
+          {/* Name */}
+          <div className="col-span-1 flex flex-col">
+            <label className="mb-1 font-semibold flex items-center gap-2 text-black"><FaUser className="text-black-600 " /> Full Name <span className="text-red-500">*</span></label>
+            <input type="text" name="name" className="form-input w-full rounded-lg border-black focus:ring-2 focus:ring-emerald-400 bg-white text-black placeholder-black" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
+          </div>
+          {/* Email */}
+          <div className="col-span-1 flex flex-col">
+            <label className="mb-1 font-semibold flex items-center gap-2 text-black"><FaEnvelope className="text-emerald-600" /> Email <span className="text-red-500">*</span></label>
+            <input type="email" name="email" className="form-input w-full rounded-lg border-black focus:ring-2 focus:ring-emerald-400 bg-white text-black placeholder-black" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} required />
+          </div>
+          {/* Phone */}
+          <div className="col-span-1 flex flex-col">
+            <label className="mb-1 font-semibold flex items-center gap-2 text-black"><FaPhone className="text-emerald-600" /> Phone Number <span className="text-red-500">*</span></label>
+            <div className="flex gap-2 items-center">
               <input
-                type={field.type || 'text'}
-                name={field.name}
-                value={form[field.name]}
-                onChange={e =>
-                  setForm(prev => ({ ...prev, [field.name]: e.target.value }))
-                }
-                className="bg-white/10 text-white placeholder:text-gray-300 border border-white/10 px-4 py-2 rounded focus:outline-none focus:ring-2 focus:ring-yellow-500"
-                required={field.required}
+                type="tel"
+                name="phone"
+                className="form-input w-full rounded-lg border-black focus:ring-2 focus:ring-emerald-400 bg-white text-black placeholder-black"
+                value={form.phone}
+                onChange={e => {
+                  const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 10);
+                  setForm({ ...form, phone: val });
+                  setOtpSent(false);
+                  setOtpVerified(false);
+                }}
+                required
+                placeholder="Enter 10-digit phone"
+                style={{ minWidth: 0 }}
               />
-            </div>
-          ))}
-
-          {/* OTP Handling */}
-          <div className="col-span-2 flex flex-col gap-2">
-            {otpSent && !otpVerified && (
-              <>
-                <label className="text-sm text-[#F5E6C8]">Enter OTP</label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={otp}
-                    onChange={e => setOtp(e.target.value)}
-                    placeholder="Enter 6-digit OTP"
-                    className="bg-white/10 text-white placeholder:text-gray-300 border border-white/10 px-4 py-2 rounded w-full"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleVerifyOtp}
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded"
-                  >
-                    Verify
-                  </button>
-                </div>
-                {otpError && <p className="text-xs text-red-400">{otpError}</p>}
-              </>
-            )}
-
-            {!otpSent && (
               <button
                 type="button"
                 onClick={handleSendOtp}
-                disabled={form.phone.length !== 10}
-                className="bg-yellow-500 hover:bg-yellow-600 text-black py-2 rounded font-semibold transition"
+                disabled={otpSent || form.phone.length !== 10}
+                className="px-4 py-2 rounded-lg bg-emerald-600 text-white font-semibold shadow hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 transition disabled:bg-gray-300 disabled:text-gray-500"
+                style={{ whiteSpace: 'nowrap' }}
               >
                 Send OTP
               </button>
+            </div>
+            {otpSent && !otpVerified && (
+              <div className="mt-2 flex gap-2 items-center">
+                <input
+                  type="text"
+                  className="form-input w-full rounded-lg border-black focus:ring-2 focus:ring-emerald-400 bg-white text-black placeholder-black"
+                  value={otp}
+                  onChange={e => setOtp(e.target.value.slice(0, 6))}
+                  placeholder="Enter OTP"
+                  style={{ minWidth: 0 }}
+                />
+                <button
+                  type="button"
+                  onClick={handleVerifyOtp}
+                  className="px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold shadow hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400 transition"
+                >
+                  Verify
+                </button>
+              </div>
             )}
-
-            {otpVerified && <p className="text-xs text-green-400">Phone verified ✅</p>}
+            {otpError && <div className="text-xs text-red-600 mt-1">{otpError}</div>}
+            {otpVerified && <div className="text-xs text-green-600 mt-1">Phone number verified</div>}
           </div>
-
+          {/* Alternate Phone */}
+          <div className="col-span-1 flex flex-col">
+            <label className="mb-1 font-semibold flex items-center gap-2 text-black"><FaPhone className="text-emerald-400" /> Alternate Phone</label>
+            <input type="tel" name="altPhone" className="form-input w-full rounded-lg border-black focus:ring-2 focus:ring-emerald-400 bg-white text-black placeholder-black" value={form.altPhone} onChange={e => setForm({ ...form, altPhone: e.target.value.replace(/[^0-9]/g, '').slice(0, 10) })} />
+          </div>
           {/* Address */}
           <div className="col-span-2 flex flex-col">
-            <label className="mb-1 text-sm text-[#F5E6C8] font-medium flex items-center gap-2">
-              <FaMapMarkerAlt className="text-yellow-500" /> Address <span className="text-red-400">*</span>
-            </label>
-            <textarea
-              name="address"
-              value={form.address}
-              onChange={e => setForm({ ...form, address: e.target.value })}
-              required
-              className="bg-white/10 text-white placeholder:text-gray-300 border border-white/10 px-4 py-2 rounded min-h-[60px]"
-            />
+            <label className="mb-1 font-semibold flex items-center gap-2 text-black"><FaMapMarkerAlt className="text-emerald-600" /> Address <span className="text-red-500">*</span></label>
+            <textarea name="address" className="form-input w-full rounded-lg border-black focus:ring-2 focus:ring-emerald-400 bg-white text-black placeholder-black min-h-[60px]" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} required />
           </div>
-
           {/* Delivery Method */}
-          <div className="flex flex-col">
-            <label className="mb-1 text-sm text-[#F5E6C8] font-medium flex items-center gap-2">
-              <FaTruck className="text-yellow-500" /> Delivery Method
-            </label>
-            <div className="flex gap-4">
-              {['Pickup', 'Delivery'].map(option => (
-                <label key={option} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="radio"
-                    name="deliveryMethod"
-                    value={option}
-                    checked={form.deliveryMethod === option}
-                    onChange={e => setForm({ ...form, deliveryMethod: e.target.value })}
-                    className="accent-yellow-500"
-                  />
-                  {option}
-                </label>
-              ))}
+          <div className="col-span-1 flex flex-col">
+            <label className="mb-1 font-semibold flex items-center gap-2 text-black"><FaTruck className="text-emerald-600" /> Delivery Method</label>
+            <div className="flex gap-4 mt-1">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="radio" name="deliveryMethod" value="Pickup" checked={form.deliveryMethod === 'Pickup'} onChange={e => setForm({ ...form, deliveryMethod: e.target.value })} className="accent-emerald-600" /> Pickup
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="radio" name="deliveryMethod" value="Delivery" checked={form.deliveryMethod === 'Delivery'} onChange={e => setForm({ ...form, deliveryMethod: e.target.value })} className="accent-emerald-600" /> Delivery
+              </label>
             </div>
           </div>
-
+          {/* Preferred Time */}
+          <div className="col-span-1 flex flex-col">
+            <label className="mb-1 font-semibold flex items-center gap-2 text-black"><FaRegClock className="text-emerald-600" /> Preferred Time</label>
+            <input type="time" name="preferredTime" className="form-input w-full rounded-lg border-black focus:ring-2 focus:ring-emerald-400 bg-white text-black placeholder-black" value={form.preferredTime} onChange={e => setForm({ ...form, preferredTime: e.target.value })} />
+          </div>
+          {/* Pickup Date */}
+          <div className="col-span-1 flex flex-col">
+            <label className="mb-1 font-semibold flex items-center gap-2 text-black">Pickup Date <span className="text-red-500">*</span></label>
+            <input type="date" name="pickupDate" className="form-input w-full rounded-lg border-black focus:ring-2 focus:ring-emerald-400 bg-white text-black placeholder-black" value={form.pickupDate} onChange={e => setForm({ ...form, pickupDate: e.target.value })} required />
+          </div>
+          {/* Return Date */}
+          <div className="col-span-1 flex flex-col">
+            <label className="mb-1 font-semibold flex items-center gap-2 text-black">Return Date <span className="text-red-500">*</span></label>
+            <input type="date" name="returnDate" className="form-input w-full rounded-lg border-black focus:ring-2 focus:ring-emerald-400 bg-white text-black placeholder-black" value={form.returnDate} onChange={e => setForm({ ...form, returnDate: e.target.value })} required />
+          </div>
           {/* Special Requests */}
           <div className="col-span-2 flex flex-col">
-            <label className="mb-1 text-sm text-[#F5E6C8] font-medium flex items-center gap-2">
-              <FaCommentDots className="text-yellow-500" /> Special Requests
-            </label>
-            <textarea
-              name="specialRequests"
-              value={form.specialRequests}
-              onChange={e => setForm({ ...form, specialRequests: e.target.value })}
-              className="bg-white/10 text-white placeholder:text-gray-300 border border-white/10 px-4 py-2 rounded min-h-[60px]"
-            />
+            <label className="mb-1 font-semibold flex items-center gap-2 text-black"><FaCommentDots className="text-emerald-600" /> Special Requests</label>
+            <textarea name="specialRequests" className="form-input w-full rounded-lg border-black focus:ring-2 focus:ring-emerald-400 bg-white text-black placeholder-black min-h-[60px]" value={form.specialRequests} onChange={e => setForm({ ...form, specialRequests: e.target.value })} placeholder="Any special instructions or requests?" />
           </div>
-
-          <button
-            type="submit"
-            className="col-span-2 bg-yellow-500 hover:bg-yellow-600 text-black py-3 rounded-xl font-bold text-lg transition"
-          >
+          <button type="submit" className="col-span-2 btn w-full bg-gradient-to-r from-emerald-700 to-amber-500 hover:from-emerald-800 hover:to-amber-600 text-white py-3 rounded-xl font-bold text-lg shadow-lg transition-all duration-200 flex items-center justify-center gap-2">
             Book Now
           </button>
         </form>
-
-        {/* Terms Modal */}
+        {/* Terms and Conditions Modal */}
         {showTerms && (
-          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-            <div className="bg-white/10 text-white border border-white/10 backdrop-blur-xl p-8 rounded-2xl max-w-md w-full">
-              <h3 className="text-lg font-bold mb-3 text-[#F5E6C8]">Terms & Conditions</h3>
-              <ul className="text-sm list-disc list-inside space-y-1 mb-4 text-gray-300">
-                <li>Bookings subject to owner approval.</li>
-                <li>Use responsibly and return on time.</li>
-                <li>Damage or delay may incur charges.</li>
-              </ul>
-              <div className="flex gap-2 items-center mb-4">
-                <input type="checkbox" checked={termsChecked} onChange={e => setTermsChecked(e.target.checked)} className="accent-yellow-500" />
-                <label className="text-sm">I agree to the terms & conditions.</label>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
+            <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-lg w-full border border-emerald-100">
+              <h3 className="text-xl font-bold mb-4 text-emerald-900">Terms and Conditions</h3>
+              <ol className="list-decimal list-inside text-gray-700 text-sm mb-4 space-y-1">
+                <li>The booking is subject to approval by the owner.</li>
+                <li>Payment must be made as per platform policy.</li>
+                <li>Use the item responsibly and return in original condition.</li>
+                <li>Late returns may incur additional charges.</li>
+                <li>Any damage to the item will be chargeable.</li>
+                <li>Personal information should not be shared outside the platform.</li>
+                <li>Follow all local laws and regulations regarding rentals.</li>
+                <li>Disputes will be resolved as per platform rules.</li>
+                <li>Booking may be cancelled if terms are violated.</li>
+                <li>Platform reserves the right to modify terms at any time.</li>
+              </ol>
+              <div className="flex items-center mb-4">
+                <input
+                  type="checkbox"
+                  id="terms"
+                  checked={termsChecked}
+                  onChange={e => setTermsChecked(e.target.checked)}
+                  className="mr-2 accent-emerald-600"
+                />
+                <label htmlFor="terms" className="text-gray-800 text-sm">I agree to the terms and conditions</label>
               </div>
-              <div className="flex gap-2 justify-end">
-                <button onClick={() => setShowTerms(false)} className="bg-yellow-500 text-black px-4 py-2 rounded font-semibold hover:bg-yellow-600" disabled={!termsChecked}>
+              <div className="flex gap-2">
+                <button
+                  className="bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2 rounded font-semibold"
+                  onClick={() => setShowTerms(false)}
+                  disabled={!termsChecked}
+                >
                   Continue
                 </button>
-                <button onClick={() => setShowTerms(false)} className="bg-white/20 text-white px-4 py-2 rounded font-semibold hover:bg-white/30">
+                <button
+                  className="bg-gray-200 hover:bg-gray-300 text-gray-800 px-4 py-2 rounded font-semibold"
+                  onClick={() => setShowTerms(false)}
+                >
                   Cancel
                 </button>
               </div>
