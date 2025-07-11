@@ -70,7 +70,6 @@ export default function BookingForm({ rentalId }) {
             setRecaptchaReady(false);
           }
         });
-        
         // Render the recaptcha
         window.recaptchaVerifier.render().then(() => {
           setRecaptchaReady(true);
@@ -83,7 +82,6 @@ export default function BookingForm({ rentalId }) {
         setOtpError("Failed to initialize verification system. Please refresh the page.");
       }
     }
-    
     // Clean up function to clear recaptcha when component unmounts
     return () => {
       if (window.recaptchaVerifier) {
@@ -103,13 +101,11 @@ export default function BookingForm({ rentalId }) {
       setOtpError('Enter a valid 10-digit phone number.');
       return;
     }
-    
     try {
       if (!window.recaptchaVerifier) {
         setOtpError('Verification system not ready. Please refresh the page.');
         return;
       }
-      
       const phoneNumber = '+91' + form.phone;
       const confirmation = await signInWithPhoneNumber(auth, phoneNumber, window.recaptchaVerifier);
       setConfirmationResult(confirmation);
@@ -184,7 +180,7 @@ export default function BookingForm({ rentalId }) {
       setError("Booking failed. Please try again.");
     }
   }
-    
+
   return (
     <Fragment>
       <style jsx global>{`
@@ -214,10 +210,8 @@ export default function BookingForm({ rentalId }) {
         <h2 className="text-3xl font-extrabold mb-6 text-emerald-900 text-center font-playfair tracking-wide drop-shadow">Book Your Product</h2>
         {error && <div className="mb-4 p-3 bg-red-100 text-red-800 rounded shadow">{error}</div>}
         {success && <div className="mb-4 p-3 bg-green-100 text-green-800 rounded shadow animate-bounce">Booking successful!</div>}
-        
         {/* Always render the recaptcha container outside of any conditional rendering */}
         <div id="recaptcha-container" style={{ position: 'absolute', bottom: 0, zIndex: -1, height: 0 }}></div>
-        
         <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Name */}
           <div className="col-span-1 flex flex-col">
